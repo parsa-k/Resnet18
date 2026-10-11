@@ -35,6 +35,10 @@ def compute_mean_std(images):
     Example (whole CIFAR-10 training set):
         mean ~ (0.491, 0.482, 0.447), std ~ (0.247, 0.243, 0.262)
     """
+    images = images.astype(np.float32)/255.0
+    mean = np.mean(images, axis=(0, 1, 2))
+    std = np.std(images, axis(0, 1, 2))
+    return tuple(mean.tolist()), tuple(std.tolist())
     # TODO 1: compute the per-channel statistics.
     #   a) Convert `images` to float32 and divide by 255.0 so values are in [0, 1].
     #   b) The array has shape (N, H, W, C). Reduce over every axis EXCEPT the channel axis
@@ -81,6 +85,10 @@ def one_hot(label, num_classes=NUM_CLASSES, smoothing=0.0):
     smoothing=0.0 gives a hard one-hot [0, ..., 1, ..., 0];
     smoothing=0.1 gives 0.91 on the true class and 0.01 elsewhere.
     """
+    tensor = torch.zeroes(num_classes)
+    tensor[label] = 1.0
+    tensor = tensor * (1-smoothing) + smoothing / num_classes
+    return tensor
     # TODO 3a: create a zero tensor of length num_classes, set position `label` to 1.0.
     # TODO 3b: apply label smoothing:  target * (1 - smoothing) + smoothing / num_classes
     #   Check: the result must always sum to 1.0. Can you prove it on paper?
@@ -99,11 +107,21 @@ class OneHot:
         self.smoothing = smoothing
 
     def __call__(self, label):
+      return one_hot(label, self.num_classes, slef.smoothing)
         # TODO 3c: call one_hot(...) with the stored settings.
         raise NotImplementedError("TODO 3c: OneHot.__call__")
 
 
 def split_indices(n, val_split=0.1, subset_fraction=1.0, seed=42, leak="none"):
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(n)
+    indices = indices[:int(n*subset_fraction)]
+    n_val = int(len(indices) * val_split)
+    val_idx = indices[:n_val]
+    train_idx = indices[n_val:]
+    if leak == "val_in_train":
+      train_idx = indices
+    return (train_idx, val_idx)
     """Shuffle 0..n-1, keep subset_fraction of them, and cut off val_split for validation.
 
     Returns (train_idx, val_idx) as numpy integer arrays.
@@ -131,6 +149,19 @@ def load_cifar10(data_dir="./data", val_split=0.1, subset_fraction=1.0, normaliz
     validation/test keep hard one-hot targets. Normalization statistics are computed
     on the training split only.
     """
+    raw = datasets.CIFAR10(data_dir, train=True, download=True)
+    train_idx, val_idx = split_indices(len(raw), val_split, subset_fraction, seed, leak)
+    if normalize:
+        mean.std = compute_mean_std(raw.data[train_idx])
+    else:
+      mean, std = None, None
+  train_tf, eval_tf = build_transforms(normalize, augment, mean, std)
+  train_full = datasets.CIFAR10(data_dir, train=True, transform=train_tf,
+                                target_transform=OneHot(smoothing=label_smoothing))
+  val_full = datasets.CIFAR10(data_dir, train=True, transform=eval_tf,
+                                target_transform=OneHot())
+  test_set = datasets.CIFAR10(data_dir, train=False, transform=eval_tf, target_transform=OneHot(), download=True)
+  return Subset(train_full, train_idx), Subset(val_full, val_idx), test_set
     # TODO 5a: load the raw training set (no transforms):
     #     raw = datasets.CIFAR10(data_dir, train=True, download=True)
     #   raw.data is a numpy array (50000, 32, 32, 3) uint8; len(raw) == 50000.
@@ -150,11 +181,18 @@ def load_cifar10(data_dir="./data", val_split=0.1, subset_fraction=1.0, normaliz
     #   (train_full and val_full read the SAME files, but apply different transforms.)
 
     # TODO 5f: return Subset(train_full, train_idx), Subset(val_full, val_idx), test_set
+    
     raise NotImplementedError("TODO 5: load_cifar10")
 
 
 def make_loaders(train_set, val_set, test_set, batch_size=128, num_workers=2, pin_memory=False):
     """Return (train_loader, val_loader, test_loader). val_loader is None if val_set is empty."""
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory)
+    val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=num_workers, pin_memory=pin_memory)
+    test_loader = DataLoader(test_set, batch_size=batch_size, num_workers=num_workers, pin_memory=pin_memory)
+    if len(val_set) == 0:
+      val_loader = None
+    return train_loader, val_loader, test_loader
     # TODO 6: create three DataLoaders with batch_size, num_workers, pin_memory and
     #   persistent_workers=(num_workers > 0).
     #   - ONLY the training loader uses shuffle=True. Why?
@@ -171,12 +209,16 @@ def labels_of(dataset):
 
 def class_counts(dataset):
     """Number of images per class, e.g. [900, 912, ...] (length NUM_CLASSES)."""
+    return np.bincount(labels_of(dataset, minlength=NUM_CLASSES))
     # TODO 7a: one line with np.bincount(labels_of(dataset), minlength=...)
     raise NotImplementedError("TODO 7a: class_counts")
 
 
 def count_overlap(train_set, val_set):
     """Number of images that appear in both subsets (should be 0!)."""
+    train_labels = labels_of(train_set)
+    val_labels = labels_of(val_set)
+    return np.intersect1d(train_labels, val_labels).size
     # TODO 7b: both are Subsets -> use their .indices; convert to Python sets and
     #   return the size of the intersection.
     raise NotImplementedError("TODO 7b: count_overlap")
@@ -187,6 +229,8 @@ def channel_stats(dataset, n=1000):
 
     With normalize=True the result should be close to mean 0 and std 1. Why?
     """
+    stack = torch.stack([dataset[i][0] for i in range(min(n, len(dataset)))], dim=0)
+    return compute_mean_std(stack)
     # TODO 8: stack the first min(n, len(dataset)) images into one tensor (n, 3, 32, 32)
     #   (dataset[i] returns (image, target)), then reduce over dims (0, 2, 3).
     raise NotImplementedError("TODO 8: channel_stats")
