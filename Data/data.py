@@ -240,23 +240,53 @@ def benchmark_loader(loader, n_batches=20):
     """Images per second the loader can deliver (first batch excluded as warm-up)."""
     # TODO 9: measure loader speed.
     #   a) iterator = iter(loader); call next(iterator) once as warm-up (workers start up)
+    iterator = iter(loader)
+    next(iterator)
     #   b) start a timer (time.time()), then fetch up to n_batches batches with next(iterator),
     #      counting the images (images.size(0)). Stop early on StopIteration.
+    start = time.time()
+    num_images = 0
+
+    for _ in range(n_batches):
+        try:
+           images, labels = next(iterator)
+           num_images += images.size(0)
+        except StopIteration:
+            break
+
     #   c) return images / elapsed seconds   (protect against dividing by 0)
-    raise NotImplementedError("TODO 9: benchmark_loader")
+    elapsed = time.time() - start
+    if elapsed <= 0:
+        return 0
+    else:
+        return num_images/elapsed
 
 
 def describe(train_set, val_set, test_set):
     """Print a summary of the three datasets. Expected output: see README "Expected output"."""
     # TODO 10: print, one per line:
     #   a) the sizes of train / val / test
+    print("Sizes:", len(train_set), len(val_set), len(test_set))
+
     #   b) the train/val overlap (count_overlap)
+    print("Train/val overlap:", count_overlap(train_set, val_set))
+
     #   c) the class counts of train and (if not empty) val (class_counts(...).tolist())
+    print("Class counts (train):", class_counts(train_set).tolist())
+    if len(val_set) > 0:
+        print("Class counts (val):", class_counts(train_set).tolist())
+
     #   d) for the first training sample  image, target = train_set[0]:
     #        image shape, dtype and min/max value;  the target vector (target.numpy().round(3))
     #        and its class name CLASSES[target.argmax()]
+    #print(type(train_set))
+    image, target = train_set[0]
+    print(f"Image tensor: {image.shape}, dtype {image.dtype}, range[{image.min().item()}, {image.max().item()}]")
+    print(f"One-hot target example: {target.numpy().round(3)} -> {CLASSES[target.argmax().item()]}")
     #   e) channel_stats of the val set (or the test set if val is empty)
-    raise NotImplementedError("TODO 10: describe")
+    stats_set = val_set if len(val_set) > 0 else test_set
+    mean, std = channel_stats(stats_set)
+    print(f"Eval-set channel mean {mean} | std {std}")
 
 
 def save_augmentation_grid(data_dir, augment, save_path, n_images=6, n_views=6, seed=0):
@@ -268,12 +298,27 @@ def save_augmentation_grid(data_dir, augment, save_path, n_images=6, n_views=6, 
     # TODO 11: draw a grid of n_images rows x (n_views + 1) columns and save it to save_path.
     #   a) train_tf, _ = build_transforms(normalize=False, augment=augment)
     #      (no normalization: we want to SEE natural colors)
+    train_tf, _ = build_transforms(normalize=False, augment=augment)
     #   b) raw = datasets.CIFAR10(data_dir, train=True, download=True); torch.manual_seed(seed)
+    raw = datasets.CIFAR10(data_dir, train=True, download=True)
+    torch.manual_seed(seed)
     #   c) fig, axes = plt.subplots(n_images, n_views + 1, figsize=(1.6 * (n_views + 1), 1.6 * n_images))
+    fig, axes = plt.subplots(n_images, n_views + 1, figsize=(1.6 * (n_views + 1), 1.6 * n_images))
     #   d) for each row: image, label = raw[row]
     #        views = [transforms.ToTensor()(image)] + [train_tf(image) for _ in range(n_views)]
     #        for each (col, view): axes[row, col].imshow(view.permute(1, 2, 0).clamp(0, 1).numpy())
     #                              (imshow wants (H, W, C), tensors are (C, H, W)); hide the axis
     #        put CLASSES[label] as the title of the first image of the row
+    for row in range(n_images):
+        image, label = raw[row]
+        views = [transforms.ToTensor()(image)] + [train_tf(image) for _ in range(n_views)]
+        for col, view in enumerate(views):
+            axes[row, col].imshow(view.permute(1, 2, 0).clamp(0, 1).numpy())
+            axes[row, col].axis("off")
+            axes[row, 0].set_title(CLASSES[label])
+
     #   e) fig.suptitle(...), fig.tight_layout(), fig.savefig(save_path, dpi=120), plt.close(fig)
-    raise NotImplementedError("TODO 11: save_augmentation_grid")
+    fig.suptitle(f"Saved augmentation samples to {augment}")
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=120)
+    plt.close(fig)
