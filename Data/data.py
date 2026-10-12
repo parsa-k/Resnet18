@@ -98,7 +98,7 @@ def one_hot(label, num_classes=NUM_CLASSES, smoothing=0.0):
     smoothing=0.1 gives 0.91 on the true class and 0.01 elsewhere.
     """
     # TODO 3a: create a zero tensor of length num_classes, set position `label` to 1.0.
-    tensor = torch.zeroes(num_classes)
+    tensor = torch.zeros(num_classes)
     tensor[label] = 1.0
     # TODO 3b: apply label smoothing:  target * (1 - smoothing) + smoothing / num_classes
     if smoothing > 0.0:
