@@ -35,16 +35,15 @@ def compute_mean_std(images):
     Example (whole CIFAR-10 training set):
         mean ~ (0.491, 0.482, 0.447), std ~ (0.247, 0.243, 0.262)
     """
-    images = images.astype(np.float32)/255.0
-    mean = np.mean(images, axis=(0, 1, 2))
-    std = np.std(images, axis(0, 1, 2))
-    return tuple(mean.tolist()), tuple(std.tolist())
     # TODO 1: compute the per-channel statistics.
     #   a) Convert `images` to float32 and divide by 255.0 so values are in [0, 1].
     #   b) The array has shape (N, H, W, C). Reduce over every axis EXCEPT the channel axis
     #      (hint: axis=(0, 1, 2)) with .mean(...) and .std(...).
     #   c) Return them as tuples of Python floats: tuple(array.tolist()).
-    raise NotImplementedError("TODO 1: compute_mean_std")
+    images = images.astype(np.float32)/255.0
+    mean = np.mean(images, axis=(0, 1, 2))
+    std = np.std(images, axis=(0, 1, 2))
+    return tuple(mean.tolist()), tuple(std.tolist())
 
 
 def build_transforms(normalize=True, augment="crop_flip", mean=None, std=None):
@@ -66,17 +65,30 @@ def build_transforms(normalize=True, augment="crop_flip", mean=None, std=None):
     # TODO 2a: build the list `pil_aug` of augmentations that work on PIL images
     #   (RandomCrop, RandomHorizontalFlip, ColorJitter) according to the table above.
     #   Hint: start with pil_aug = [] and use `if augment in (...)` checks to append.
+    pil_aug = []
+    if augment in ("crop_flip", "strong"):
+        pil_aug.append(transforms.RandomCrop(32, padding=4))
+    if augment in ("flip", "crop_flip", "strong"):
+        pil_aug.append(transforms.RandomHorizontalFlip())
+    if augment == "strong":
+        pil_aug.append(transforms.ColorJitter(0.3, 0.3, 0.3))
 
     # TODO 2b: build the list `base` that BOTH train and eval use:
     #   always transforms.ToTensor()  (PIL uint8 HxWxC [0,255] -> float CxHxW [0,1]),
     #   plus transforms.Normalize(mean, std) if normalize is True.
+    base = [transforms.ToTensor()]
+    if normalize:
+        base.append(transforms.Normalize(mean, std))
 
     # TODO 2c: build `tensor_aug`: [RandomErasing(...)] only for "strong", otherwise [].
     #   Question for you: why must RandomErasing come AFTER ToTensor?
+    tensor_aug = []
+    if augment == "strong":
+        tensor_aug.append(transforms.RandomErasing(p=0.5, scale=(0.02, 0.15)))
 
     # TODO 2d: return transforms.Compose(pil_aug + base + tensor_aug), transforms.Compose(base)
     #   Question for you: why does the eval transform contain NO augmentation?
-    raise NotImplementedError("TODO 2: build_transforms")
+    return transforms.Compose(pil_aug + base + tensor_aug), transforms.Compose(base)
 
 
 def one_hot(label, num_classes=NUM_CLASSES, smoothing=0.0):
@@ -85,14 +97,14 @@ def one_hot(label, num_classes=NUM_CLASSES, smoothing=0.0):
     smoothing=0.0 gives a hard one-hot [0, ..., 1, ..., 0];
     smoothing=0.1 gives 0.91 on the true class and 0.01 elsewhere.
     """
+    # TODO 3a: create a zero tensor of length num_classes, set position `label` to 1.0.
     tensor = torch.zeroes(num_classes)
     tensor[label] = 1.0
-    tensor = tensor * (1-smoothing) + smoothing / num_classes
-    return tensor
-    # TODO 3a: create a zero tensor of length num_classes, set position `label` to 1.0.
     # TODO 3b: apply label smoothing:  target * (1 - smoothing) + smoothing / num_classes
+    if smoothing > 0.0:
+        tensor = tensor * (1-smoothing) + smoothing / num_classes
     #   Check: the result must always sum to 1.0. Can you prove it on paper?
-    raise NotImplementedError("TODO 3: one_hot")
+    return tensor
 
 
 class OneHot:
@@ -107,21 +119,11 @@ class OneHot:
         self.smoothing = smoothing
 
     def __call__(self, label):
-      return one_hot(label, self.num_classes, slef.smoothing)
         # TODO 3c: call one_hot(...) with the stored settings.
-        raise NotImplementedError("TODO 3c: OneHot.__call__")
+        return one_hot(label, self.num_classes, self.smoothing)
 
 
 def split_indices(n, val_split=0.1, subset_fraction=1.0, seed=42, leak="none"):
-    rng = np.random.default_rng(seed)
-    indices = rng.permutation(n)
-    indices = indices[:int(n*subset_fraction)]
-    n_val = int(len(indices) * val_split)
-    val_idx = indices[:n_val]
-    train_idx = indices[n_val:]
-    if leak == "val_in_train":
-      train_idx = indices
-    return (train_idx, val_idx)
     """Shuffle 0..n-1, keep subset_fraction of them, and cut off val_split for validation.
 
     Returns (train_idx, val_idx) as numpy integer arrays.
@@ -138,7 +140,16 @@ def split_indices(n, val_split=0.1, subset_fraction=1.0, seed=42, leak="none"):
     #   c) n_val = int(len(indices) * val_split); the first n_val go to validation,
     #      the rest to training
     #   d) if leak == "val_in_train": make train_idx contain ALL kept indices (bug on purpose)
-    raise NotImplementedError("TODO 4: split_indices")
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(n)
+    indices = indices[:int(n*subset_fraction)]
+    n_val = int(len(indices) * val_split)
+    val_idx = indices[:n_val]
+    train_idx = indices[n_val:]
+    if leak == "val_in_train":
+      train_idx = indices
+    return (train_idx, val_idx)
+
 
 
 def load_cifar10(data_dir="./data", val_split=0.1, subset_fraction=1.0, normalize=True,
@@ -149,55 +160,51 @@ def load_cifar10(data_dir="./data", val_split=0.1, subset_fraction=1.0, normaliz
     validation/test keep hard one-hot targets. Normalization statistics are computed
     on the training split only.
     """
-    raw = datasets.CIFAR10(data_dir, train=True, download=True)
-    train_idx, val_idx = split_indices(len(raw), val_split, subset_fraction, seed, leak)
-    if normalize:
-        mean.std = compute_mean_std(raw.data[train_idx])
-    else:
-      mean, std = None, None
-  train_tf, eval_tf = build_transforms(normalize, augment, mean, std)
-  train_full = datasets.CIFAR10(data_dir, train=True, transform=train_tf,
-                                target_transform=OneHot(smoothing=label_smoothing))
-  val_full = datasets.CIFAR10(data_dir, train=True, transform=eval_tf,
-                                target_transform=OneHot())
-  test_set = datasets.CIFAR10(data_dir, train=False, transform=eval_tf, target_transform=OneHot(), download=True)
-  return Subset(train_full, train_idx), Subset(val_full, val_idx), test_set
     # TODO 5a: load the raw training set (no transforms):
     #     raw = datasets.CIFAR10(data_dir, train=True, download=True)
     #   raw.data is a numpy array (50000, 32, 32, 3) uint8; len(raw) == 50000.
+    raw = datasets.CIFAR10(data_dir, train=True, download=True)
 
     # TODO 5b: get (train_idx, val_idx) from split_indices(...).
+    train_idx, val_idx = split_indices(len(raw), val_split, subset_fraction, seed, leak)
 
     # TODO 5c: if normalize, compute (mean, std) with compute_mean_std on the TRAINING
     #   images only: raw.data[train_idx]. Otherwise mean, std = None, None.
     #   Question for you: why not compute them on all 50000 images, or on the test set?
+    if normalize:
+        mean.std = compute_mean_std(raw.data[train_idx])
+    else:
+      mean, std = None, None
 
     # TODO 5d: train_tf, eval_tf = build_transforms(...)
+    train_tf, eval_tf = build_transforms(normalize, augment, mean, std)
 
     # TODO 5e: create three CIFAR10 datasets:
     #   train_full: train=True,  transform=train_tf, target_transform=OneHot(smoothing=label_smoothing)
     #   val_full:   train=True,  transform=eval_tf,  target_transform=OneHot()
     #   test_set:   train=False, transform=eval_tf,  target_transform=OneHot(), download=True
     #   (train_full and val_full read the SAME files, but apply different transforms.)
+    train_full = datasets.CIFAR10(data_dir, train=True, transform=train_tf,
+                                target_transform=OneHot(smoothing=label_smoothing))
+    val_full = datasets.CIFAR10(data_dir, train=True, transform=eval_tf,
+                                target_transform=OneHot())
+    test_set = datasets.CIFAR10(data_dir, train=False, transform=eval_tf, target_transform=OneHot(), download=True)
 
     # TODO 5f: return Subset(train_full, train_idx), Subset(val_full, val_idx), test_set
-    
-    raise NotImplementedError("TODO 5: load_cifar10")
-
+    return Subset(train_full, train_idx), Subset(val_full, val_idx), test_set
 
 def make_loaders(train_set, val_set, test_set, batch_size=128, num_workers=2, pin_memory=False):
     """Return (train_loader, val_loader, test_loader). val_loader is None if val_set is empty."""
+    # TODO 6: create three DataLoaders with batch_size, num_workers, pin_memory and
+    #   persistent_workers=(num_workers > 0).
+    #   - ONLY the training loader uses shuffle=True. Why?
+    #   - Return None instead of a val loader when len(val_set) == 0.
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory)
     val_loader = DataLoader(val_set, batch_size=batch_size, num_workers=num_workers, pin_memory=pin_memory)
     test_loader = DataLoader(test_set, batch_size=batch_size, num_workers=num_workers, pin_memory=pin_memory)
     if len(val_set) == 0:
       val_loader = None
     return train_loader, val_loader, test_loader
-    # TODO 6: create three DataLoaders with batch_size, num_workers, pin_memory and
-    #   persistent_workers=(num_workers > 0).
-    #   - ONLY the training loader uses shuffle=True. Why?
-    #   - Return None instead of a val loader when len(val_set) == 0.
-    raise NotImplementedError("TODO 6: make_loaders")
 
 
 def labels_of(dataset):
@@ -209,19 +216,17 @@ def labels_of(dataset):
 
 def class_counts(dataset):
     """Number of images per class, e.g. [900, 912, ...] (length NUM_CLASSES)."""
-    return np.bincount(labels_of(dataset, minlength=NUM_CLASSES))
     # TODO 7a: one line with np.bincount(labels_of(dataset), minlength=...)
-    raise NotImplementedError("TODO 7a: class_counts")
+    return np.bincount(labels_of(dataset, minlength=NUM_CLASSES))
 
 
 def count_overlap(train_set, val_set):
     """Number of images that appear in both subsets (should be 0!)."""
+    # TODO 7b: both are Subsets -> use their .indices; convert to Python sets and
+    #   return the size of the intersection.
     train_labels = labels_of(train_set)
     val_labels = labels_of(val_set)
     return np.intersect1d(train_labels, val_labels).size
-    # TODO 7b: both are Subsets -> use their .indices; convert to Python sets and
-    #   return the size of the intersection.
-    raise NotImplementedError("TODO 7b: count_overlap")
 
 
 def channel_stats(dataset, n=1000):
@@ -233,7 +238,6 @@ def channel_stats(dataset, n=1000):
     return compute_mean_std(stack)
     # TODO 8: stack the first min(n, len(dataset)) images into one tensor (n, 3, 32, 32)
     #   (dataset[i] returns (image, target)), then reduce over dims (0, 2, 3).
-    raise NotImplementedError("TODO 8: channel_stats")
 
 
 def benchmark_loader(loader, n_batches=20):
