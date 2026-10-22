@@ -81,20 +81,43 @@ def parse_overrides(config, args):
     #   validate, convert and store the value.
     #   Careful: bool must be checked BEFORE int, because isinstance(True, int) is True
     #   in Python, and bool("False") is True!
-    raise NotImplementedError("TODO [Week 1] 1: parse_overrides")
+    for arg in args:
+        if "=" not in arg:
+            raise ValueError(f"Invalid override: {arg!r}. Expected key=value")
+
+        key, value = arg.split("=", 1)
+        if key not in config:
+            raise KeyError(f"Unknown config key: {key}")
+
+        default = config[key]
+        if isinstance(default, bool):
+            converted = value.lower() in ("true", "1", "yes")
+        elif isinstance(default, int):
+            converted = int(value)
+        elif isinstance(default, float):
+            converted = float(value)
+        else:
+            converted = value
+        config[key] = converted
+    return config
 
 
 def set_seed(seed):
     """Make runs reproducible: seed Python's `random`, NumPy and PyTorch."""
     # TODO [Week 1] 2: three lines - random.seed, np.random.seed, torch.manual_seed
-    raise NotImplementedError("TODO [Week 1] 2: set_seed")
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
 
 def get_device():
     """Return the fastest available device: CUDA GPU, then Apple-silicon GPU (MPS), then CPU."""
     # TODO [Week 1] 3: use torch.cuda.is_available() and torch.backends.mps.is_available()
-    #   and return torch.device("cuda" / "mps" / "cpu").
-    raise NotImplementedError("TODO [Week 1] 3: get_device")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 def build_data(cfg, device):
@@ -102,23 +125,46 @@ def build_data(cfg, device):
     # TODO [Week 1] 4:
     #   a) call data.load_cifar10(...) passing the matching cfg values
     #      (data_dir, val_split, subset_fraction, normalize, augment, label_smoothing, seed, leak)
+    train_set, val_set, test_set = data.load_cifar10(
+        data_dir=cfg["data_dir"],
+        val_split=cfg["val_split"],
+        subset_fraction=cfg["subset_fraction"],
+        normalize=cfg["normalize"],
+        augment=cfg["augment"],
+        label_smoothing=cfg["label_smoothing"],
+        seed=cfg["seed"],
+        leak=cfg["leak"],
+    )
     #   b) call data.make_loaders(...) with cfg["batch_size"], cfg["num_workers"] and
     #      pin_memory=(device.type == "cuda")   (pinned memory only speeds up CUDA transfers)
+    train_loader, val_loader, test_loader = data.make_loaders(
+        train_set,
+        val_set,
+        test_set,
+        batch_size=cfg["batch_size"],
+        num_workers=cfg["num_workers"],
+        pin_memory=(device.type == "cuda"),
+    )
     #   c) return both tuples
-    raise NotImplementedError("TODO [Week 1] 4: build_data")
+    return (train_set, val_set, test_set), (train_loader, val_loader, test_loader)
 
 
 def run_data_stage(cfg, device, run_dir):
     """Week 1 output: dataset summary, loader speed and an image of augmented samples."""
     # TODO [Week 1] 5:
     #   a) (train_set, val_set, test_set), (train_loader, _, _) = build_data(cfg, device)
+    (train_set, val_set, test_set), (train_loader, _, _) = build_data(cfg, device)
     #   b) data.describe(train_set, val_set, test_set)
+    data.describe(train_set, val_set, test_set)
     #   c) rate = data.benchmark_loader(train_loader); print it together with
     #      cfg["batch_size"] and cfg["num_workers"], e.g.
     #        "Loader speed: 16,444 images/s (batch_size=128, num_workers=2)"
+    rate = data.benchmark_loader(train_loader)
+    print(f"Loader speed: {rate:.0f} images/s (batch_size={cfg['batch_size']}, num_workers={cfg['num_workers']})")
     #   d) data.save_augmentation_grid(cfg["data_dir"], cfg["augment"], run_dir / "augmentations.png")
     #      and print where the image was saved.
-    raise NotImplementedError("TODO [Week 1] 5: run_data_stage")
+    data.save_augmentation_grid(cfg["data_dir"], cfg["augment"], run_dir / "augmentations.png")
+    print(f"Saved augmentation samples to {run_dir / 'augmentations.png'}")
 
 
 def build_model(cfg, device):
@@ -234,18 +280,36 @@ def main():
     # TODO [Week 1] 6:
     #   a) cfg = parse_overrides(dict(CONFIG), sys.argv[1:])
     #      (dict(CONFIG) makes a copy, so the defaults above are never modified)
+    cfg = parse_overrides(dict(CONFIG), sys.argv[1:])
     #   b) raise ValueError if cfg["stage"] is not in STAGES or cfg["leak"] is not in LEAKS
+    if cfg["stage"] not in STAGES:
+        raise ValueError(f"Unknown stage: {cfg['stage']}. Choose from {STAGES}")
+    if cfg["leak"] not in LEAKS:
+        raise ValueError(f"Unknown leak mode: {cfg['leak']}. Choose from {LEAKS}")
     #   c) set_seed(cfg["seed"]); device = get_device()
+    set_seed(cfg["seed"])
+    device = get_device()
     #   d) run_dir = Path(cfg["output_dir"]) / cfg["run_name"]; create it
     #      (run_dir.mkdir(parents=True, exist_ok=True)) and save the config into it as
     #      config.json - every run must remember exactly which settings produced it!
+    run_dir = Path(cfg["output_dir"]) / cfg["run_name"]
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "config.json").write_text(json.dumps(cfg, indent=2))
     #   e) print the stage, device and run_dir
+    print(f"Stage: {cfg['stage']} | Device: {device} | Run dir: {run_dir}")
     #   f) call the right function for cfg["stage"]:
     #        "data"  -> run_data_stage(cfg, device, run_dir)
     #        "model" -> run_model_stage(cfg, device)
     #        "train" -> run_train_stage(cfg, device, run_dir)
     #        "full"  -> run_full_stage(cfg, device, run_dir)
-    raise NotImplementedError("TODO [Week 1] 6: main")
+    if cfg["stage"] == "data":
+        run_data_stage(cfg, device, run_dir)
+    elif cfg["stage"] == "model":
+        run_model_stage(cfg, device)
+    elif cfg["stage"] == "train":
+        run_train_stage(cfg, device, run_dir)
+    elif cfg["stage"] == "full":
+        run_full_stage(cfg, device, run_dir)
 
 
 if __name__ == "__main__":
