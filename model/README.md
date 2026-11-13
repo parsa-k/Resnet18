@@ -333,9 +333,9 @@ If you have a GPU, compare `cuda`/`mps` with the CPU (temporarily return `torch.
 
 ## Part E — Deliverables checklist
 
-- [ ] All `resnet.py` TODOs and the `TODO [Week 2]` blocks of `main.py` are done; Part C checks pass.
-- [ ] `python main.py stage=model` shows 11,173,962 parameters, initial loss ≈ 2.3-2.5 and overfits the batch.
-- [ ] `python main.py stage=train ...` prints a decreasing training loss.
+- [x] All `resnet.py` TODOs and the `TODO [Week 2]` blocks of `main.py` are done; Part C checks pass.
+- [x] `python main.py stage=model` shows 11,173,962 parameters, initial loss ≈ 2.3-2.5 and overfits the batch.
+- [x] `python main.py stage=train ...` prints a decreasing training loss.
 - [ ] Report: outputs + answers for Experiments 1-6.
 
 **Next week** you will add validation, a proper evaluation, and run a full set of experiments on
