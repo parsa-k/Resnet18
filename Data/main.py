@@ -170,35 +170,32 @@ def run_data_stage(cfg, device, run_dir):
 def build_model(cfg, device):
     import resnet
 
-    # TODO [Week 2] 6:
-    #   a) model = resnet.ResNet18(data.NUM_CLASSES, <stem>, <width>, <dropout>, <residual>)
-    #      taking the values from cfg, and move it to `device` with .to(device)
-    #   b) print a summary line, e.g.
-    #        "ResNet-18 (residual, stem=cifar, width=64): 11,173,962 parameters"
-    #      ("plain" instead of "residual" when cfg["residual"] is False;
-    #       use resnet.count_parameters(model))
-    #   c) return model
-    raise NotImplementedError("TODO [Week 2] 6: build_model")
+    model = resnet.ResNet18(data.NUM_CLASSES, cfg["stem"], cfg["width"], cfg["dropout"], cfg["residual"]).to(device)
+    residual_str = "residual" if cfg["residual"] else "plain"
+    print(f"ResNet-18 ({residual_str}, stem={cfg['stem']}, width={cfg['width']}): {resnet.count_parameters(model):,} parameters")
+    return model
 
 
 def run_model_stage(cfg, device):
     """Week 2 output: layer shapes, initial loss, gradient norms and a single-batch overfit test."""
     import resnet
 
-    # TODO [Week 2] 7:
-    #   a) model = build_model(cfg, device); resnet.trace_shapes(model)
-    #   b) take ONE batch from the training loader of build_data(cfg, device)
-    #      (hint: next(iter(train_loader))) and move images and targets to `device`
-    #   c) under torch.no_grad(): compute logits = model(images) and compare
-    #        resnet.soft_cross_entropy(logits, targets)   (yours)
-    #        F.cross_entropy(logits, targets)            (PyTorch, accepts probability targets)
-    #        np.log(data.NUM_CLASSES)                    (theory: loss of a uniform guess)
-    #      print all three - the first two must match exactly.
-    #   d) print every (name, norm) of resnet.gradient_norms(model, images, targets)
-    #   e) optimizer = resnet.build_optimizer(model, cfg["optimizer"], cfg["lr"], cfg["momentum"], 0.0)
-    #      losses = resnet.overfit_single_batch(model, images, targets, optimizer, cfg["overfit_steps"])
-    #      print the first and the last loss.
-    raise NotImplementedError("TODO [Week 2] 7: run_model_stage")
+    model = build_model(cfg, device)
+    resnet.trace_shapes(model)
+    images, targets = next(iter(build_data(cfg, device)[1][0]))
+    images, targets = images.to(device), targets.to(device)
+    with torch.no_grad():
+        logits = model(images)
+        loss_yours = resnet.soft_cross_entropy(logits, targets)
+        loss_torch = F.cross_entropy(logits, targets)
+        loss_theory = np.log(data.NUM_CLASSES)
+        print(f"Loss (yours): {loss_yours:.4f}, Loss (torch): {loss_torch:.4f}, Loss (theory): {loss_theory:.4f}")
+    norms = resnet.gradient_norms(model, images, targets)
+    for name, norm in norms.items():
+        print(f"{name}: {norm:.4f}")
+    optimizer = resnet.build_optimizer(model, cfg["optimizer"], cfg["lr"], cfg["momentum"], 0.0)
+    losses = resnet.overfit_single_batch(model, images, targets, optimizer, cfg["overfit_steps"])
+    print(f"First loss: {losses[0]:.4f}, Last loss: {losses[-1]:.4f}")
 
 
 def train(cfg, model, train_loader, device, run_dir, monitor_loader=None, evaluate_fn=None):
@@ -209,40 +206,35 @@ def train(cfg, model, train_loader, device, run_dir, monitor_loader=None, evalua
     history = {k: [] for k in ("train_loss", "train_acc", "val_loss", "val_acc", "lr", "epoch_time")}
     best_acc, best_path = -1.0, run_dir / "best_model.pt"
 
-    # TODO [Week 2] 8a: build the optimizer and the scheduler with resnet.build_optimizer(...)
-    #   and resnet.build_scheduler(...) using the cfg values.
+    optimizer = resnet.build_optimizer(model, cfg["optimizer"], cfg["lr"], cfg["momentum"], cfg["weight_decay"])
+    scheduler = resnet.build_scheduler(optimizer, cfg["scheduler"], cfg["epochs"])
+    for epoch in range(1, cfg["epochs"] + 1):
+        start = time.time()
+        history["lr"].append(optimizer.param_groups[0]["lr"])
+        train_loss, train_acc = resnet.train_one_epoch(model, train_loader, optimizer, device)
+        if scheduler is not None:
+            scheduler.step()
 
-    # TODO [Week 2] 8b: the epoch loop: for epoch in range(1, cfg["epochs"] + 1):
-    #   1. start = time.time()
-    #   2. record the current learning rate: history["lr"].append(optimizer.param_groups[0]["lr"])
-    #   3. train_loss, train_acc = resnet.train_one_epoch(model, train_loader, optimizer, device)
-    #   4. if scheduler is not None: scheduler.step()      (ONCE per epoch, AFTER training)
-    #   5. append train_loss / train_acc to history
-    #   6. build a progress line, e.g.
-    #        "Epoch   3/30 | lr 0.0976 | train loss 1.2345 acc 0.5432"
-    #   7. if evaluate_fn is not None:   -> TODO [Week 3] 9 (leave it for Week 3)
-    #   8. history["epoch_time"].append(time.time() - start) and print the line + seconds
+        history["train_loss"].append(train_loss)
+        history["train_acc"].append(train_acc)
+        line = (
+            f"Epoch {epoch:3d}/{cfg['epochs']} | "
+            f"lr {history['lr'][-1]:.4f} | "
+            f"train loss {train_loss:.4f} acc {train_acc:.4f}"
+        )
+        history["epoch_time"].append(time.time() - start)
+        print(f"{line} | {history['epoch_time'][-1]:.1f}s")
 
-    # TODO [Week 3] 9: (inside the epoch loop, step 7) validation + checkpointing
-    #   a) val_loss, val_acc = evaluate_fn(model, monitor_loader, device); append both to history
-    #   b) add f" | val loss {val_loss:.4f} acc {val_acc:.4f}" to the progress line
-    #   c) if val_acc > best_acc: update best_acc, save the checkpoint
-    #        torch.save({"model_state": model.state_dict(), "epoch": epoch,
-    #                    "val_acc": val_acc, "config": cfg}, best_path)
-    #      and add "  * saved" to the progress line.
-
-    # TODO [Week 2] 8c: after the loop, save the history as JSON:
-    #   (run_dir / "history.json").write_text(json.dumps(history, indent=2))
-    raise NotImplementedError("TODO [Week 2] 8: train")
+    (run_dir / "history.json").write_text(json.dumps(history, indent=2))
     return history, best_path
 
 
 def run_train_stage(cfg, device, run_dir):
     """Week 2 output: training loss/accuracy per epoch (no validation yet)."""
-    # TODO [Week 2] 10: get the train loader from build_data, build the model, call
-    #   train(cfg, model, train_loader, device, run_dir)  (no evaluate_fn -> no validation)
-    #   and print where history.json was saved.
-    raise NotImplementedError("TODO [Week 2] 10: run_train_stage")
+    _, (train_loader, _, _) = build_data(cfg, device)
+    model = build_model(cfg, device)
+    train(cfg, model, train_loader, device, run_dir)
+    print(f"Saved training history to {run_dir / 'history.json'}")
 
 
 def run_full_stage(cfg, device, run_dir):

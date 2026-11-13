@@ -172,7 +172,7 @@ def load_cifar10(data_dir="./data", val_split=0.1, subset_fraction=1.0, normaliz
     #   images only: raw.data[train_idx]. Otherwise mean, std = None, None.
     #   Question for you: why not compute them on all 50000 images, or on the test set?
     if normalize:
-        mean.std = compute_mean_std(raw.data[train_idx])
+        mean, std = compute_mean_std(raw.data[train_idx])
     else:
       mean, std = None, None
 
